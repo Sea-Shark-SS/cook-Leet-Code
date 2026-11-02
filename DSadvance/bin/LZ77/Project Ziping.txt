@@ -1,0 +1,234 @@
+To develop a file compression tool using LZ77 for pattern-based compression and Huffman Coding for 
+entropy-based compression, we can break down the solution into several steps.
+ Here's an outline of how this compression tool would be structured:
+
+1. LZ77 Compression
+LZ77 is a lossless data compression algorithm that works by finding patterns (repeated substrings) in data using a sliding window approach.
+
+Components of LZ77:
+Sliding Window: A portion of the input data that keeps track of past content. The window size can be adjusted based on your specific needs (typically 32KB or 64KB).
+Hashtable: To speed up pattern searches in the sliding window.
+Tuples: Each token is a tuple of three components:
+Offset: The position in the sliding window from where the pattern starts.
+Length: The length of the pattern.
+Next Character: The next character after the pattern.
+
+Steps for LZ77 Compression:
+Use a sliding window to search for patterns in the input.
+If a match is found, create a tuple (offset, length, next_char).
+If no match is found, the tuple would be (0, 0, next_char).
+Move the window forward and repeat the process.
+2. Huffman Coding for LZ77 Tokens
+Huffman Coding is a type of entropy-based compression that creates variable-length codes for data based on their frequency of occurrence.
+
+Steps for Huffman Coding:
+1.Frequency Analysis: Count the frequency of each LZ77 token generated from the LZ77 compression.
+2.Binary Tree:
+3.Use a priority queue to build a binary tree, where each leaf node is a token and the frequency is the priority.
+4.Combine the two nodes with the lowest frequency until the tree is complete.
+
+Code Generation:
+Traverse the tree to generate variable-length codes (shorter codes for more frequent tokens).
+Use a hashtable to store the mapping of LZ77 tokens to Huffman codes.
+Encoding:
+Replace each LZ77 token with its corresponding Huffman code.
+3. Decoding Process
+To decompress the file, you need to reverse the process:
+
+Use the Huffman code to decode the tokens.
+Use the LZ77 algorithm to reconstruct the original data from the token stream.
+
+
+
+Code in c:(Raw structure just reference)
+:
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <limits.h>
+
+#define WINDOW_SIZE 4096   // Size of the sliding window
+#define BUFFER_SIZE 32     // Size of the look-ahead buffer
+
+// LZ77 Token Structure
+typedef struct {
+    int offset;
+    int length;
+    char next_char;
+} LZ77Token;
+
+// Node Structure for Huffman Tree
+typedef struct HuffmanNode {
+    char *token;
+    int frequency;
+    struct HuffmanNode *left;
+    struct HuffmanNode *right;
+} HuffmanNode;
+
+// Node Structure for Priority Queue
+typedef struct PriorityQueueNode {
+    HuffmanNode *huff_node;
+    struct PriorityQueueNode *next;
+} PriorityQueueNode;
+
+// Helper function to create LZ77 Token
+LZ77Token create_lz77_token(int offset, int length, char next_char) {
+    LZ77Token token;
+    token.offset = offset;
+    token.length = length;
+    token.next_char = next_char;
+    return token;
+}
+
+// Helper function to search the longest match in the sliding window
+int find_longest_match(char *window, int window_size, char *buffer, int buffer_size, int *match_offset) {
+    int max_length = 0;
+    *match_offset = 0;
+
+    for (int i = 0; i < window_size; i++) {
+        int length = 0;
+
+        // Compare buffer with the current position in the window
+        while (length < buffer_size && window[i + length] == buffer[length]) {
+            length++;
+        }
+
+        // Update the best match if found
+        if (length > max_length) {
+            max_length = length;
+            *match_offset = window_size - i;
+        }
+    }
+    return max_length;
+}
+
+// LZ77 Compression Function
+int lz77_compress(char *input_data, int input_size, LZ77Token *compressed_data, int *token_count) {
+    int window_start = 0;
+    int i = 0;
+    *token_count = 0;
+
+    while (i < input_size) {
+        int match_offset = 0;
+        int max_length = 0;
+        char *buffer = &input_data[i];
+        int buffer_size = (input_size - i < BUFFER_SIZE) ? (input_size - i) : BUFFER_SIZE;
+
+        // Find the longest match in the sliding window
+        max_length = find_longest_match(&input_data[window_start], i - window_start, buffer, buffer_size, &match_offset);
+
+        if (max_length > 0) {
+            char next_char = (max_length < buffer_size) ? buffer[max_length] : '\0';
+            compressed_data[*token_count] = create_lz77_token(match_offset, max_length, next_char);
+            *token_count += 1;
+            i += max_length + 1;
+        } else {
+            compressed_data[*token_count] = create_lz77_token(0, 0, buffer[0]);
+            *token_count += 1;
+            i++;
+        }
+
+        // Slide the window forward
+        if (i > WINDOW_SIZE) {
+            window_start = i - WINDOW_SIZE;
+        }
+    }
+    return 0;
+}
+
+// Priority Queue Functions for Huffman Coding
+PriorityQueueNode* enqueue(PriorityQueueNode *head, HuffmanNode *huff_node) {
+    PriorityQueueNode *new_node = (PriorityQueueNode *)malloc(sizeof(PriorityQueueNode));
+    new_node->huff_node = huff_node;
+    new_node->next = NULL;
+
+    if (head == NULL || huff_node->frequency < head->huff_node->frequency) {
+        new_node->next = head;
+        return new_node;
+    }
+
+    PriorityQueueNode *current = head;
+    while (current->next != NULL && current->next->huff_node->frequency <= huff_node->frequency) {
+        current = current->next;
+    }
+    new_node->next = current->next;
+    current->next = new_node;
+
+    return head;
+}
+
+HuffmanNode* dequeue(PriorityQueueNode **head) {
+    if (*head == NULL) return NULL;
+    PriorityQueueNode *temp = *head;
+    *head = (*head)->next;
+    HuffmanNode *huff_node = temp->huff_node;
+    free(temp);
+    return huff_node;
+}
+
+// Helper function to create a Huffman Node
+HuffmanNode* create_huffman_node(char *token, int frequency) {
+    HuffmanNode *node = (HuffmanNode *)malloc(sizeof(HuffmanNode));
+    node->token = token;
+    node->frequency = frequency;
+    node->left = NULL;
+    node->right = NULL;
+    return node;
+}
+
+// Huffman Encoding (Skeleton)
+void huffman_encode(LZ77Token *tokens, int token_count) {
+    // Frequency Analysis
+    int frequency[256] = {0};
+
+    // Calculate frequency of each token
+    for (int i = 0; i < token_count; i++) {
+        frequency[tokens[i].next_char]++;
+    }
+
+    // Build Huffman Tree using Priority Queue
+    PriorityQueueNode *queue = NULL;
+    for (int i = 0; i < 256; i++) {
+        if (frequency[i] > 0) {
+            char *token = (char *)malloc(2);
+            token[0] = (char)i;
+            token[1] = '\0';
+            queue = enqueue(queue, create_huffman_node(token, frequency[i]));
+        }
+    }
+
+    // Merge nodes to build the tree
+    while (queue && queue->next) {
+        HuffmanNode *left = dequeue(&queue);
+        HuffmanNode *right = dequeue(&queue);
+        HuffmanNode *parent = create_huffman_node(NULL, left->frequency + right->frequency);
+        parent->left = left;
+        parent->right = right;
+        queue = enqueue(queue, parent);
+    }
+
+    // Huffman Tree is now built; implement code generation (left as an exercise)
+}
+
+// Main function for demonstration
+int main() {
+    char input_data[] = "ABABCBABABABABCDAB";
+    int input_size = strlen(input_data);
+
+    // LZ77 Compression
+    LZ77Token compressed_data[1024];
+    int token_count = 0;
+
+    lz77_compress(input_data, input_size, compressed_data, &token_count);
+
+    printf("LZ77 Compression:\n");
+    for (int i = 0; i < token_count; i++) {
+        printf("(%d, %d, '%c')\n", compressed_data[i].offset, compressed_data[i].length, compressed_data[i].next_char);
+    }
+
+    // Huffman Encoding (currently a skeleton implementation)
+    huffman_encode(compressed_data, token_count);
+
+    return 0;
+}
